@@ -1,0 +1,136 @@
+# docker compose -p marketplace-dev -f compose-dev.yaml up -d
+# docker-compose -p marketplace-dev -f compose-dev.yaml up -d
+
+# docker compose -p marketplace-dev -f compose-dev.yaml down -v
+# docker-compose -p marketplace-dev -f compose-dev.yaml down -v
+
+services:
+  catalog_db_dev:
+    container_name: "catalog-db-dev" # имя контейнера для базы данных каталога товаров
+    image: postgres:18.1 # образ PostgreSQL 18.1
+    environment: # переменные окружения для базы данных
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=12345678
+      - POSTGRES_DB=catalog-db-dev
+    restart: always
+    ports: # порты для базы данных
+      - "9101:5432"
+    volumes: 
+      - postgres_catalog_dev:/var/lib/postgresql
+    networks: 
+      - marketplace-dev-net # сеть для базы данных
+    healthcheck: # проверка здоровья базы данных
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s  
+      retries: 5   
+      start_period: 30s
+
+  basket_db_dev: 
+    container_name: "basket-db-dev"
+    image: postgres:18.1
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=12345678
+      - POSTGRES_DB=basket-db-dev
+    restart: always
+    ports:
+      - "9102:5432"
+    volumes:
+      - postgres_basket_dev:/var/lib/postgresql
+    networks:
+      - marketplace-dev-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s  
+      retries: 5   
+      start_period: 30s
+
+  basket_cache_redis_dev:
+    container_name: basket-redis-dev
+    image: redis:7
+    command: redis-server --requirepass "12345678" --protected-mode no
+    restart: always
+    ports:
+      - "9112:6379"
+    volumes:
+      - redis_basket_dev:/data
+    networks:
+      - marketplace-dev-net
+
+  # promotion grpc
+  promotion_db:
+    container_name: promotion-db-dev
+    image: mysql:8.0
+    environment:
+      - MYSQL_ROOT_PASSWORD=12345678
+      - MYSQL_DATABASE=promotion-db
+    restart: always
+    ports:
+      - "9103:3306"
+    volumes:
+      - mysql_promotion:/var/lib/mysql
+    networks:
+      - marketplace-dev-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p12345678"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+
+  # checkout
+  checkout_db_dev:
+    container_name: checkout-db-dev
+    image: postgres:18.1
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=12345678
+      - POSTGRES_DB=checkout-db-dev
+    restart: always
+    ports:
+      - "9104:5432"
+    volumes:
+      - postgres_checkout_dev:/var/lib/postgresql
+    networks:
+      - marketplace-dev-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  rabbit_mq_dev:
+    container_name: rabbit-mq-dev
+    hostname: marketplace-mq
+    image: rabbitmq:3-management
+    environment:
+      - RABBITMQ_DEFAULT_USER=guest
+      - RABBITMQ_DEFAULT_PASS=guest
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data_dev:/var/lib/rabbitmq
+    networks:
+      - marketplace-dev-net
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+volumes:
+  postgres_catalog_dev:
+  postgres_basket_dev:
+  redis_basket_dev:
+  mysql_promotion:
+  postgres_checkout_dev:
+  rabbitmq_data_dev:
+
+networks:
+  marketplace-dev-net:
+    driver: bridge
