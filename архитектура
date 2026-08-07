@@ -464,3 +464,5 @@ internal/catalog/
 ```
 
 Правило: зависимости идут **сверху вниз**. `entities` не импортирует никого. `repository` импортирует `entities`. `main` импортирует всё остальное, но не наоборот.
+
+migrate -path migrations/catalog -database "postgres://postgres:12345678@localhost:9101/catalog-db-dev?sslmode=disable" up
