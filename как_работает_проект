@@ -1,0 +1,367 @@
+# Как работает проект: связи папок и их смысл
+
+---
+
+## Главная идея
+
+Проект построен по принципу **Чистой Архитектуры (Clean Architecture)**.
+Суть одна: **код разбит на слои, и каждый слой знает только о том, что ниже него**.
+
+```
+Запрос от клиента
+      ↓
+   cmd/          ← 1. Точка входа, запуск сервера
+      ↓
+ api/handlers/   ← 2. Принять HTTP-запрос, вернуть JSON
+      ↓
+ application/    ← 3. Выполнить бизнес-сценарий
+      ↓
+ domain/         ← 4. Правила и контракты (интерфейсы)
+      ↑
+infrastructure/  ← 5. Реально идёт в PostgreSQL
+```
+
+Нижние слои **не знают** о верхних. Это ключевое правило.
+
+---
+
+## Папки и почему они так называются
+
+### `cmd/catalog/`
+**cmd** = command (команда, точка входа).
+Здесь только `main.go` — старт программы.
+- Загружает `.env` (настройки)
+- Подключается к PostgreSQL
+- **Собирает все зависимости** (создаёт репозитории, хендлеры) и передаёт их друг другу
+- Запускает HTTP-сервер Gin
+
+> Правило: в `cmd/` нет никакой бизнес-логики. Только «склейка» компонентов и запуск.
+
+---
+
+### `internal/catalog/domain/`
+**domain** = предметная область (то, о чём наш сервис).
+Это самый чистый слой — не знает ни о Gin, ни о PostgreSQL.
+
+#### `domain/entities/`
+**entities** = сущности (объекты предметной области).
+Тут живут структуры данных: `Brand`, `Category`, `CatalogItem`.
+Это просто Go-структуры. Никаких SQL-тегов, никаких HTTP-зависимостей.
+
+```go
+type Brand struct {
+    BaseEntity  // Id + Title
+}
+```
+
+#### `domain/repositories/`
+**repositories** = контракты (интерфейсы) для работы с данными.
+Здесь мы говорим: **«нам нужен метод `Brands()`, но нам всё равно, откуда данные»**.
+
+```go
+type BrandRepository interface {
+    Brands(ctx context.Context) ([]entities.Brand, error)
+}
+```
+
+> Это контракт. Кто угодно может его реализовать: PostgreSQL, MySQL, массив в памяти, мок для тестов.
+
+---
+
+### `internal/catalog/infrastructure/persistence/`
+**infrastructure** = инфраструктура (внешние технологии).
+**persistence** = хранение данных (от лат. «сохраняться»).
+
+Здесь живёт реальная работа с PostgreSQL:
+- SQL-запросы (`SELECT id, title FROM brands`)
+- `rows.Scan()` — чтение результата из БД в структуры
+- Обработка SQL-ошибок
+
+Структура `BrandRepository` тут **реализует контракт** из `domain/repositories`.
+То есть она говорит: *«Я выполняю метод `Brands()` — и делаю это через PostgreSQL»*.
+
+> Если завтра сменить PostgreSQL на MongoDB — меняется только эта папка.
+
+---
+
+### `internal/catalog/application/queries/`
+**application** = прикладной слой (бизнес-сценарии).
+**queries** = запросы на чтение данных (в отличие от команд на изменение).
+
+Здесь живут **бизнес-сценарии**: «получить список брендов», «получить список категорий».
+
+```go
+type BrandsHandler struct {
+    repo repositories.BrandRepository // только интерфейс, не PostgreSQL
+}
+
+func (q *BrandsHandler) Handle(ctx context.Context) ([]entities.Brand, error) {
+    return q.repo.Brands(ctx)
+}
+```
+
+Этот слой не знает про SQL. Он знает только, что у него есть «что-то, умеющее возвращать бренды» — и вызывает это.
+
+---
+
+### `internal/catalog/api/handlers/`
+**api** = интерфейс взаимодействия с клиентами (HTTP API).
+**handlers** = обработчики HTTP-запросов (контроллеры).
+
+Принимает HTTP-запрос от Gin, вызывает `application`, возвращает JSON:
+
+```go
+func (h *BrandsHandler) Brands(c *gin.Context) {
+    brands, err := h.brands.Handle(c.Request.Context())
+    if err != nil {
+        c.JSON(500, gin.H{"error": err.Error()})
+        return
+    }
+    c.JSON(200, gin.H{"data": brands})
+}
+```
+
+> Правило: здесь нет никакого SQL, нет бизнес-логики. Только HTTP.
+
+### `internal/catalog/api/routes.go`
+Регистрирует URL-адреса и связывает их с хендлерами:
+
+```go
+v1.GET("/brands", brands.Brands)
+v1.GET("/categories", categories.Categories)
+```
+
+---
+
+### `migrations/catalog/`
+SQL-файлы для создания/удаления таблиц в PostgreSQL.
+
+| Файл | Что делает |
+|------|------------|
+| `001_init_schema.up.sql` | Создаёт таблицу `brands` |
+| `001_init_schema.down.sql` | Удаляет таблицу `brands` |
+| `002_create_categories.up.sql` | Создаёт таблицу `categories` |
+| `002_create_categories.down.sql` | Удаляет таблицу `categories` |
+
+Нумерация `001`, `002` важна — утилита `migrate` применяет их строго по порядку и запоминает, что уже применено.
+
+---
+
+## Связи одной строкой
+
+```
+main.go
+  создаёт → persistence.BrandRepository     (знает SQL)
+  передаёт в → queries.BrandsHandler        (знает бизнес-правила)
+  передаёт в → handlers.BrandsHandler       (знает HTTP)
+  регистрирует в → routes.go                (знает URL)
+```
+
+Каждый слой зависит только от того, что ниже:
+```
+handlers → queries → repositories (интерфейс) ← persistence
+```
+
+**persistence реализует интерфейс repositories** — вот вся магия связи между инфраструктурой и бизнес-логикой.
+
+---
+
+## Репозиторий Item
+
+### Сущность `Item`
+```go
+type Item struct {
+    ID          int64    // Уникальный идентификатор
+    BrandID     int64    // Связь с брендом
+    CategoryID  int64    // Связь с категорией
+    Name        string   // Наименование товара
+    Description string   // Описание товара
+    Price       float64  // Цена
+    CreatedAt   time.Time
+    UpdatedAt   time.Time
+}
+```
+
+### Интерфейс репозитория
+```go
+package repositories
+
+import "context"
+
+type ItemRepository interface {
+    // Получить все товары
+    Items(ctx context.Context) ([]entities.Item, error)
+    // Получить товар по ID
+    GetByID(ctx context.Context, id int64) (entities.Item, error)
+    // Создать новый товар
+    Create(ctx context.Context, item entities.Item) (int64, error)
+    // Обновить существующий товар
+    Update(ctx context.Context, item entities.Item) error
+    // Удалить товар
+    Delete(ctx context.Context, id int64) error
+}
+```
+
+### Реализация в `infrastructure/persistence`
+```go
+package persistence
+
+import (
+    "context"
+    "database/sql"
+    "github.com/jmoiron/sqlx"
+    "myproject/internal/catalog/domain/entities"
+    "myproject/internal/catalog/domain/repositories"
+)
+
+type itemRepo struct {
+    db *sqlx.DB
+}
+
+func NewItemRepository(db *sqlx.DB) repositories.ItemRepository {
+    return &itemRepo{db: db}
+}
+
+func (r *itemRepo) Items(ctx context.Context) ([]entities.Item, error) {
+    var items []entities.Item
+    err := r.db.SelectContext(ctx, &items, "SELECT id, brand_id, category_id, name, description, price, created_at, updated_at FROM items")
+    return items, err
+}
+
+func (r *itemRepo) GetByID(ctx context.Context, id int64) (entities.Item, error) {
+    var item entities.Item
+    err := r.db.GetContext(ctx, &item, "SELECT id, brand_id, category_id, name, description, price, created_at, updated_at FROM items WHERE id=$1", id)
+    return item, err
+}
+
+func (r *itemRepo) Create(ctx context.Context, item entities.Item) (int64, error) {
+    var id int64
+    err := r.db.QueryRowxContext(ctx, "INSERT INTO items (brand_id, category_id, name, description, price, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,now(),now()) RETURNING id",
+        item.BrandID, item.CategoryID, item.Name, item.Description, item.Price).Scan(&id)
+    return id, err
+}
+
+func (r *itemRepo) Update(ctx context.Context, item entities.Item) error {
+    _, err := r.db.ExecContext(ctx, "UPDATE items SET brand_id=$1, category_id=$2, name=$3, description=$4, price=$5, updated_at=now() WHERE id=$6",
+        item.BrandID, item.CategoryID, item.Name, item.Description, item.Price, item.ID)
+    return err
+}
+
+func (r *itemRepo) Delete(ctx context.Context, id int64) error {
+    _, err := r.db.ExecContext(ctx, "DELETE FROM items WHERE id=$1", id)
+    return err
+}
+```
+
+### Использование в бизнес‑слое
+```go
+type ItemsHandler struct {
+    repo repositories.ItemRepository
+}
+
+func (h *ItemsHandler) List(ctx context.Context) ([]entities.Item, error) {
+    return h.repo.Items(ctx)
+}
+```
+
+> **Важно:** бизнес‑слой зависит лишь от интерфейса `ItemRepository`, поэтому для тестов можно подменить его мок‑реализацией, а в проде подключить `persistence`‑реализацию, работающую с PostgreSQL.
+
+---
+
+### Миграции
+```sql
+-- 003_create_items.up.sql
+CREATE TABLE items (
+    id BIGSERIAL PRIMARY KEY,
+    brand_id BIGINT NOT NULL REFERENCES brands(id),
+    category_id BIGINT NOT NULL REFERENCES categories(id),
+    name TEXT NOT NULL,
+    description TEXT,
+    price NUMERIC(10,2) NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT now()
+);
+
+-- 003_create_items.down.sql
+DROP TABLE items;
+```
+
+Теперь проект полностью поддерживает сущность `Item` и её CRUD‑операции через чистую архитектуру.
+
+
+---
+
+## API Handlers for Items
+
+```go
+package handlers
+
+import (
+    "context"
+    "myproject/internal/catalog/application/queries"
+    "myproject/internal/catalog/domain/entities"
+    "net/http"
+    "github.com/gin-gonic/gin"
+)
+
+type ItemsHTTPHandler struct {
+    query *queries.ItemsHandler
+}
+
+func NewItemsHTTPHandler(q *queries.ItemsHandler) *ItemsHTTPHandler {
+    return &ItemsHTTPHandler{query: q}
+}
+
+func (h *ItemsHTTPHandler) List(c *gin.Context) {
+    items, err := h.query.List(c.Request.Context())
+    if err != nil {
+        c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+        return
+    }
+    c.JSON(http.StatusOK, gin.H{"data": items})
+}
+```
+
+## Routes for Items
+
+```go
+// internal/catalog/api/routes.go (additional registrations)
+
+v1.GET("/items", itemsHandler.List)
+```
+
+## Wiring in main.go
+
+```go
+// cmd/catalog/main.go (excerpt)
+
+import (
+    "myproject/internal/catalog/domain/repositories"
+    "myproject/internal/catalog/infrastructure/persistence"
+    "myproject/internal/catalog/application/queries"
+    "myproject/internal/catalog/api/handlers"
+    "github.com/gin-gonic/gin"
+    "github.com/jmoiron/sqlx"
+    _ "github.com/lib/pq"
+)
+
+func main() {
+    // ... existing setup ...
+    db, _ := sqlx.Connect("postgres", "postgres://user:pass@localhost:5432/dbname?sslmode=disable")
+    // Repository implementations
+    itemRepo := persistence.NewItemRepository(db)
+    // Business layer
+    itemsHandler := &queries.ItemsHandler{Repo: itemRepo}
+    // HTTP layer
+    itemsHTTP := handlers.NewItemsHTTPHandler(itemsHandler)
+
+    r := gin.Default()
+    v1 := r.Group("/api/v1")
+    // existing routes
+    v1.GET("/items", itemsHTTP.List)
+    // start server
+    r.Run()
+}
+```
+
+---

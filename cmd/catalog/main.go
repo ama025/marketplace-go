@@ -8,6 +8,7 @@ import (
 
 	"marketplace/internal/catalog/api"
 	"marketplace/internal/catalog/api/handlers"
+	"marketplace/internal/catalog/application/commands"
 	"marketplace/internal/catalog/application/queries"
 	"marketplace/internal/catalog/infrastructure/persistence"
 
@@ -58,13 +59,24 @@ func main() {
 	listBrandsHandler := queries.NewBrandsHandler(brandRepo)
 	brandsHandler := handlers.NewBrandsHandler(listBrandsHandler)
 
+	categoryRepo := persistence.NewCategoryRepository(db)
+	listCategoriesHandler := queries.NewCategoriesHandler(categoryRepo)
+	categoriesHandler := handlers.NewCategoriesHandler(listCategoriesHandler)
+
+	itemRepo := persistence.NewItemRepository(db)
+	listItemsHandler := queries.NewCatalogItemsHandler(itemRepo)
+	itemByIDHandler := queries.NewCatalogItemByIDHandler(itemRepo)
+	itemsByTitle := queries.NewCatalogItemByTitleHandler(itemRepo)
+	createItem := commands.NewCreateCatalogItemHandler(itemRepo)
+	itemsHandler := handlers.NewCatalogItemsHandler(listItemsHandler, itemByIDHandler, itemsByTitle, createItem)
+	
 	r := gin.Default()
 
 	r.GET("/health", func(ctx *gin.Context) {
 		ctx.JSON(200, gin.H{"status": "ok"})
 	})
 
-	api.RegisterRoutes(r, brandsHandler)
+	api.RegisterRoutes(r, brandsHandler, categoriesHandler, itemsHandler)
 
 	if err := r.Run(":" + appPort); err != nil {
 		log.Fatal(err)
