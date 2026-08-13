@@ -1,0 +1,344 @@
+# docker compose -p marketplace-prod -f compose-prod.yaml up -d
+# docker-compose -p marketplace-prod -f compose-prod.yaml up -d
+
+# docker compose -p marketplace-prod -f compose-prod.yaml up --build -d
+# docker compose -p marketplace-prod -f compose-prod.yaml build --no-cache catalog_api
+
+# docker compose -p marketplace-prod -f compose-prod.yaml down -v
+# docker-compose -p marketplace-prod -f compose-prod.yaml down -v
+
+services:
+  # ─── Catalog ───────────────────────────────────────────────────────────────
+  catalog_db_prod:
+    container_name: "catalog-db-prod"
+    image: postgres:18.1
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=12345678
+      - POSTGRES_DB=catalog-db-prod
+    restart: always
+    ports:
+      - "9301:5432"
+    volumes:
+      - postgres_catalog_prod:/var/lib/postgresql
+    networks:
+      - marketplace-prod-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  catalog_api:
+    container_name: catalog-api
+    build:
+      context: .
+      dockerfile: cmd/catalog/Dockerfile
+    ports:
+      - "9201:7001"
+    networks:
+      - marketplace-prod-net
+    environment:
+      - CATALOG_APP_PORT=7001
+      - CATALOG_PG_HOST=catalog_db_prod
+      - CATALOG_PG_PORT=5432
+      - CATALOG_PG_DATABASE=catalog-db-prod
+      - CATALOG_PG_USER=postgres
+      - CATALOG_PG_PASSWORD=12345678
+      - CATALOG_PG_SSLMODE=disable
+      - CATALOG_MIGRATIONS_PATH=file:///app/migrations/catalog
+    depends_on:
+      catalog_db_prod:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:7001/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  # ─── Basket (TODO: раскомментировать когда будет готов cmd/basket) ────────
+  # basket_db_prod:
+  #   container_name: "basket-db-prod"
+  #   image: postgres:18.1
+  #   environment:
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=12345678
+  #     - POSTGRES_DB=basket-db-prod
+  #   restart: always
+  #   ports:
+  #     - "9302:5432"
+  #   volumes:
+  #     - postgres_basket_prod:/var/lib/postgresql
+  #   networks:
+  #     - marketplace-prod-net
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 30s
+
+  # basket_cache_redis_prod:
+  #   container_name: basket-redis-prod
+  #   image: redis:7
+  #   command: redis-server --requirepass "12345678" --protected-mode no
+  #   restart: always
+  #   ports:
+  #     - "9312:6379"
+  #   volumes:
+  #     - redis_basket_prod:/data
+  #   networks:
+  #     - marketplace-prod-net
+  #   healthcheck:
+  #     test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 20s
+
+  # basket_api:
+  #   container_name: basket-api
+  #   build:
+  #     context: .
+  #     dockerfile: cmd/basket/Dockerfile
+  #   ports:
+  #     - "9202:7002"
+  #   networks:
+  #     - marketplace-prod-net
+  #   environment:
+  #     - BASKET_APP_PORT=7002
+  #     - BASKET_DATABASE_URL=postgres://postgres:12345678@basket_db_prod:5432/basket-db-prod?sslmode=disable
+  #     - BASKET_MIGRATIONS_PATH=file:///app/migrations/basket
+  #     - BASKET_REDIS_URL=basket_cache_redis_prod:6379
+  #     - BASKET_REDIS_PASSWORD=12345678
+  #     - BASKET_PROMOTION_HOST=promotion-grpc
+  #     - BASKET_PROMOTION_PORT=7003
+  #     - BASKET_RABBITMQ_HOST=rabbit_mq_prod
+  #     - BASKET_RABBITMQ_PORT=5672
+  #     - BASKET_RABBITMQ_USER=guest
+  #     - BASKET_RABBITMQ_PASSWORD=guest
+  #   depends_on:
+  #     basket_db_prod:
+  #       condition: service_healthy
+  #     basket_cache_redis_prod:
+  #       condition: service_healthy
+  #     promotion-grpc:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+  # ─── Promotion (TODO: раскомментировать когда будет готов cmd/promotion) ──
+  # promotion_db_prod:
+  #   container_name: promotion-db-prod
+  #   image: mysql:8.0
+  #   environment:
+  #     MYSQL_ROOT_PASSWORD: 12345678
+  #     MYSQL_DATABASE: promotion-db
+  #     MYSQL_CHARACTER_SET_SERVER: utf8mb4
+  #     MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+  #   restart: always
+  #   ports:
+  #     - "9303:3306"
+  #   volumes:
+  #     - mysql_promotion_prod:/var/lib/mysql
+  #   networks:
+  #     - marketplace-prod-net
+  #   healthcheck:
+  #     test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p12345678"]
+  #     interval: 10s
+  #     timeout: 10s
+  #     retries: 10
+  #     start_period: 30s
+
+  # promotion-grpc:
+  #   container_name: promotion-grpc
+  #   build:
+  #     context: .
+  #     dockerfile: cmd/promotion/Dockerfile
+  #   ports:
+  #     - "9203:7003"
+  #     - "9213:7013"
+  #   networks:
+  #     - marketplace-prod-net
+  #   environment:
+  #     - PROMOTION_DATABASE_URL=root:12345678@tcp(promotion_db_prod:3306)/promotion-db?parseTime=true&multiStatements=true
+  #     - PROMOTION_MIGRATIONS_PATH=file:///app/migrations/promotion
+  #     - PROMOTION_GRPC_PORT=7003
+  #     - PROMOTION_METRICS_PORT=7013
+  #   depends_on:
+  #     promotion_db_prod:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+  # ─── Checkout (TODO: раскомментировать когда будет готов cmd/checkout) ────
+  # checkout_db_prod:
+  #   container_name: checkout-db-prod
+  #   image: postgres:18.1
+  #   environment:
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=12345678
+  #     - POSTGRES_DB=checkout-db-prod
+  #   restart: always
+  #   ports:
+  #     - "9304:5432"
+  #   volumes:
+  #     - postgres_checkout_prod:/var/lib/postgresql
+  #   networks:
+  #     - marketplace-prod-net
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 30s
+
+  # rabbit_mq_prod:
+  #   container_name: rabbit-mq-prod
+  #   hostname: marketplace-mq
+  #   image: rabbitmq:3-management
+  #   environment:
+  #     - RABBITMQ_DEFAULT_USER=guest
+  #     - RABBITMQ_DEFAULT_PASS=guest
+  #   restart: always
+  #   ports:
+  #     - "5672:5672"
+  #     - "15672:15672"
+  #   volumes:
+  #     - rabbitmq_data_prod:/var/lib/rabbitmq
+  #   networks:
+  #     - marketplace-prod-net
+
+  # checkout_api:
+  #   container_name: checkout-api
+  #   build:
+  #     context: .
+  #     dockerfile: cmd/checkout/Dockerfile
+  #   ports:
+  #     - "9204:7004"
+  #   networks:
+  #     - marketplace-prod-net
+  #   environment:
+  #     - CHECKOUT_APP_PORT=7004
+  #     - CHECKOUT_DATABASE_URL=postgres://postgres:12345678@checkout_db_prod:5432/checkout-db-prod?sslmode=disable
+  #     - CHECKOUT_MIGRATIONS_PATH=file:///app/migrations/checkout
+  #     - CHECKOUT_RABBITMQ_HOST=rabbit_mq_prod
+  #     - CHECKOUT_RABBITMQ_PORT=5672
+  #     - CHECKOUT_RABBITMQ_USER=guest
+  #     - CHECKOUT_RABBITMQ_PASSWORD=guest
+  #   depends_on:
+  #     checkout_db_prod:
+  #       condition: service_healthy
+  #     rabbit_mq_prod:
+  #       condition: service_healthy
+  #   restart: unless-stopped
+
+  # ─── Мониторинг (TODO: раскомментировать когда будет создана папка infrastructure/) ─
+  # prometheus:
+  #   container_name: prometheus-prod
+  #   image: prom/prometheus:v3.10.0
+  #   restart: always
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+  #     - prometheus_data:/prometheus
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #     - '--web.console.libraries=/etc/prometheus/console_libraries'
+  #     - '--web.console.templates=/etc/prometheus/consoles'
+  #     - '--web.enable-lifecycle'
+  #   networks:
+  #     - marketplace-prod-net
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9090/-/healthy || exit 1"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #     start_period: 15s
+
+  # grafana:
+  #   container_name: grafana-prod
+  #   image: grafana/grafana:12.3.4
+  #   restart: always
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - GF_SECURITY_ADMIN_USER=admin
+  #     - GF_SECURITY_ADMIN_PASSWORD=admin
+  #     - GF_USERS_ALLOW_SIGN_UP=false
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #     - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+  #   networks:
+  #     - marketplace-prod-net
+  #   depends_on:
+  #     prometheus:
+  #       condition: service_healthy
+
+  # ─── Нагрузочное тестирование (TODO: раскомментировать когда будет infrastructure/k6/) ─
+  # k6:
+  #   container_name: k6-load-test
+  #   image: grafana/k6:latest
+  #   volumes:
+  #     - ./infrastructure/k6:/scripts:ro
+  #   environment:
+  #     - TARGET_URL=http://catalog_api:7001
+  #   networks:
+  #     - marketplace-prod-net
+  #   depends_on:
+  #     catalog_api:
+  #       condition: service_healthy
+  #   command: ["run", "/scripts/catalog-test.js"]
+  #   restart: "no"
+
+  # k6-grpc (TODO: раскомментировать когда будет готов promotion-grpc)
+  # k6-grpc:
+  #   container_name: k6-grpc-load-test
+  #   image: grafana/k6:latest
+  #   volumes:
+  #     - ./infrastructure/k6:/scripts:ro
+  #     - ./proto:/proto:ro
+  #   environment:
+  #     - GRPC_TARGET=promotion-grpc:7003
+  #   networks:
+  #     - marketplace-prod-net
+  #   depends_on:
+  #     promotion-grpc:
+  #       condition: service_healthy
+  #   command: ["run", "/scripts/grpc-load-test.js"]
+  #   restart: "no"
+
+  # ─── Управление контейнерами (TODO: раскомментировать когда будет infrastructure/portainer_password.txt) ─
+  # portainer:
+  #   container_name: portainer
+  #   image: portainer/portainer-ce:latest
+  #   command: --admin-password-file /tmp/portainer_password
+  #   restart: always
+  #   ports:
+  #     - "9000:9000"
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #     - portainer_data:/data
+  #     - ./infrastructure/portainer_password.txt:/tmp/portainer_password:ro
+  #   networks:
+  #     - marketplace-prod-net
+  #   healthcheck:
+  #     disable: true
+
+volumes:
+  postgres_catalog_prod:
+  # postgres_basket_prod:     # раскомментировать с basket_api
+  # redis_basket_prod:        # раскомментировать с basket_api
+  # mysql_promotion_prod:     # раскомментировать с promotion-grpc
+  # postgres_checkout_prod:   # раскомментировать с checkout_api
+  # rabbitmq_data_prod:       # раскомментировать с checkout_api/basket_api
+  # prometheus_data:          # раскомментировать с prometheus
+  # grafana_data:             # раскомментировать с grafana
+  # portainer_data:           # раскомментировать с portainer
+
+networks:
+  marketplace-prod-net:
+    driver: bridge

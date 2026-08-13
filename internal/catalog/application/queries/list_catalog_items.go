@@ -5,9 +5,10 @@ import (
 
 	"marketplace/internal/catalog/domain/entities"    // Импортируем доменные сущности (CatalogItem)
 	"marketplace/internal/catalog/domain/repositories" // Импортируем абстрактные интерфейсы репозиториев
+	"marketplace/internal/catalog/domain/spec"         // Параметры фильтрации, сортировки и пагинации
 )
 
-// CatalogItemsHandler — обработчик бизнес-сценария "Получить список всех товаров каталога".
+// CatalogItemsHandler — обработчик бизнес-сценария «Получить список товаров каталога с фильтрацией».
 // В соответствии с принципами Чистой Архитектуры, он зависит ТОЛЬКО от абстрактного
 // интерфейса (repositories.CatalogItemRepository), а не от конкретной реализации PostgreSQL или MySQL.
 type CatalogItemsHandler struct {
@@ -22,15 +23,31 @@ func NewCatalogItemsHandler(repo repositories.CatalogItemRepository) *CatalogIte
 
 // Handle — основной метод выполнения бизнес-сценария.
 //
+// Принимает QueryArgs с параметрами фильтрации, сортировки и пагинации.
+// Нормализует параметры (минимальный/максимальный pageSize) перед передачей в репозиторий.
+//
 // Параметры:
 //   - ctx (context.Context): контекст выполнения для контроля таймаутов
+//   - args (spec.QueryArgs): параметры запроса (brandId, categoryId, search, sort, pageIndex, pageSize)
 //
 // Возвращает:
-//   - []entities.CatalogItem: массив доменных объектов товаров каталога (с брендами и категориями)
+//   - spec.Pagination[entities.CatalogItem]: страница товаров + метаданные пагинации
 //   - error: ошибку, если чтение из репозитория не удалось
-func (q *CatalogItemsHandler) Handle(ctx context.Context) ([]entities.CatalogItem, error) {
-	// Делегируем задачу получения данных репозиторию.
-	// Этот слой не знает, откуда берутся данные (PostgreSQL, MongoDB, мок) —
-	// он просто вызывает метод интерфейса.
-	return q.repo.Items(ctx)
+func (q *CatalogItemsHandler) Handle(ctx context.Context, args spec.QueryArgs) (spec.Pagination[entities.CatalogItem], error) {
+	// Нормализуем параметры пагинации: приводим pageIndex и pageSize к допустимым значениям
+	args.NormaLize()
+
+	// Делегируем задачу репозиторию: он построит SQL с WHERE, ORDER BY, LIMIT/OFFSET
+	items, totalCount, err := q.repo.ItemsWithFilter(ctx, args)
+	if err != nil {
+		return spec.Pagination[entities.CatalogItem]{}, err
+	}
+
+	// Собираем и возвращаем страничный ответ
+	return spec.Pagination[entities.CatalogItem]{
+		PageIndex:  args.PageIndex,
+		PageSize:   args.PageSize,
+		TotalCount: totalCount,
+		Items:      items,
+	}, nil
 }

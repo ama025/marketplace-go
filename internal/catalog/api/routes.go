@@ -26,7 +26,11 @@ func RegisterRoutes(
 	v1.GET("/catalog-items", items.ListCatalogItems)
 	v1.GET("/catalog-items/:id", items.CatalogItemByID)
 	v1.GET("/catalog-items/title/:title", items.CatalogItemByTitle)
-	
-	v1.POST("/catalog-items", items.CreateCatalogItem)
-}
+	v1.GET("/catalog-items/brand/:brand", items.CatalogItemByBrand) // Поиск товаров по названию бренда
 
+	v1.POST("/catalog-items", items.CreateCatalogItem)
+
+	v1.PUT("/catalog-items", items.UpdateCatalogItem)
+
+	v1.DELETE("/catalog-items/:id", items.DeleteCatalogItem)
+}

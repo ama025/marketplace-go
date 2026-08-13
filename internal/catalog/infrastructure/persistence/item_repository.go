@@ -4,8 +4,10 @@ import (
 	"context"      // Стандартный контекст Go для управления временем выполнения операций
 	"database/sql" // Пакет для отправки запросов в реляционную БД (*sql.DB)
 	"fmt"          // Пакет для форматирования ошибок (fmt.Errorf)
+	"strings"      // Пакет для работы со строками (построение динамического WHERE-условия)
 
 	"marketplace/internal/catalog/domain/entities" // Импортируем доменную модель CatalogItem
+	"marketplace/internal/catalog/domain/spec"     // Параметры фильтрации, сортировки и пагинации
 
 	"github.com/google/uuid" // Пакет для работы с UUID-идентификаторами
 )
@@ -207,4 +209,338 @@ func (r *itemRepository) Create(ctx context.Context, item *entities.CatalogItem)
 	}
 
 	return item, nil
+}
+
+
+func (r *itemRepository) Update(ctx context.Context,item *entities.CatalogItem) (bool, error) {
+	var brandID,categoryID *uuid.UUID
+
+	if item.Brand != nil {
+		brandID = &item.Brand.Id
+	}
+
+	if item.Category != nil {
+		categoryID = &item.Category.Id
+	}
+
+	sqlQuery := `
+		UPDATE
+		catalog_items
+		SET
+			title = $2,
+			short_description = $3,
+			full_description = $4,
+			image_url = $5,
+			brand_id = $6,
+			category_id = $7,
+			price = $8
+		WHERE
+			id = $1;
+	`
+
+	result,err := r.db.ExecContext(ctx,sqlQuery,item.Id,item.Title,item.ShortDescription,item.FullDescription,item.ImageURL,brandID,categoryID,item.Price) //Метод ExecContext в Go служит для выполнения SQL-запросов, которые изменяют данные или структуру базы, но не возвращают строки с данными 
+	if err != nil {
+		return false, fmt.Errorf("failed to update item: %w", err)
+	}
+
+	n,_ := result.RowsAffected()
+	return n>0, nil
+
+	
+}
+
+
+// Delete удаляет товар из каталога по его уникальному идентификатору (UUID).
+// Возвращает true, если товар был успешно удален, и false, если товара с таким ID не существовало.
+func (r *itemRepository) Delete(ctx context.Context, id uuid.UUID) (bool, error) {
+	// Подготавливаем SQL-запрос. Использование плейсхолдера $1 защищает от SQL-инъекций.
+	sqlDeleteItem := "DELETE FROM catalog_items WHERE id = $1"
+	
+	// Выполняем запрос в контексте. ExecContext используется для операций, 
+	// которые не возвращают строки данных (INSERT, UPDATE, DELETE).
+	result, err := r.db.ExecContext(
+		ctx,           // Передаем контекст для контроля таймаутов и отмены запроса
+		sqlDeleteItem, // Сам SQL-запрос
+		id,            // Значение, которое подставится вместо $1
+	)
+	// Если во время общения с базой данных произошла системная ошибка (например, пропала связь)
+	if err != nil {
+		// Возвращаем false и оборачиваем ошибку (%w), добавляя контекст (какой ID не удалось удалить)
+		return false, fmt.Errorf("delete item[%v]: %w", id, err)
+	}
+	
+	// Получаем количество строк, которые физически были затронуты (удалены) этим запросом.
+	// Ошибку игнорируем (_), так как для DELETE в большинстве драйверов (например, pgx) она всегда nil.
+	n, _ := result.RowsAffected() 
+	
+	// Если n > 0, значит строка существовала и была удалена (функция вернет true).
+	// Если n == 0, значит в базе и так не было товара с таким ID (функция вернет false).
+	return n > 0, nil
+}
+
+
+// ItemsByBrand — ищет товары каталога по названию бренда (частичное совпадение).
+// Использует SQL-оператор LIKE с подстановочными символами '%' для поиска подстроки.
+//
+// Параметры:
+//   - ctx: контекст запроса для управления таймаутами и отменой
+//   - brandTitle: строка для поиска в названии бренда (например, "Nike" найдет "Nike", "Nike Air" и т.д.)
+//
+// Возвращает:
+//   - []entities.CatalogItem: список товаров, бренд которых содержит указанную подстроку
+//   - error: ошибку SQL-запроса или сканирования строк
+func (r *itemRepository) ItemsByBrand(ctx context.Context, brandTitle string) ([]entities.CatalogItem, error) {
+	// Формируем SQL-запрос: базовый SELECT с JOIN + фильтрация по названию бренда.
+	// Оператор LIKE с '%' по обе стороны ищет подстроку в любом месте названия бренда.
+	// $1 — плейсхолдер PostgreSQL, защищающий от SQL-инъекций.
+	query := sqlCatalogItemsQuery + `WHERE b.title LIKE '%' || $1 || '%'`
+
+	// Выполняем SQL-запрос с контекстом, передавая название бренда как параметр
+	rows, err := r.db.QueryContext(ctx, query, brandTitle)
+	if err != nil {
+		// Оборачиваем ошибку с контекстом для удобной отладки
+		return nil, fmt.Errorf("items by brand query: %w", err)
+	}
+	// Гарантируем закрытие курсора после завершения чтения
+	defer rows.Close()
+
+	// Слайс для накопления найденных товаров
+	var items []entities.CatalogItem
+
+	// Итерируем по всем строкам результата
+	for rows.Next() {
+		// Сканируем текущую строку в структуру CatalogItem
+		item, err := scanCatalogItem(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan catalog item by brand error: %w", err)
+		}
+		// Добавляем товар в итоговый слайс
+		items = append(items, item)
+	}
+
+	// Возвращаем результат и возможную ошибку итерации
+	return items, rows.Err()
+}
+
+// ItemsWithFilter — метод получения товаров каталога с поддержкой:
+//   - Фильтрации по brand_id, category_id и поисковой строке (title/short_description)
+//   - Сортировки по цене и названию (price_asc, price_desc, title_asc, title_desc)
+//   - Пагинации (LIMIT / OFFSET)
+//
+// Возвращает:
+//   - []entities.CatalogItem: страница товаров
+//   - int: общее количество товаров, удовлетворяющих фильтру (для расчёта числа страниц)
+//   - error: ошибку SQL-запроса или сканирования
+func (r *itemRepository) ItemsWithFilter(ctx context.Context, args spec.QueryArgs) ([]entities.CatalogItem, int, error) {
+	// --- Динамическое построение WHERE-условия ---
+	// conditions — набор SQL-фрагментов вида "ci.brand_id = $N"
+	// sqlArgs — список значений-аргументов, соответствующих плейсхолдерам $1, $2, …
+	var conditions []string
+	var sqlArgs []any
+
+	// Счётчик плейсхолдеров: PostgreSQL использует $1, $2, …, а не ?
+	argIdx := 1
+
+	// Фильтр по бренду: если передан brandId — парсим UUID и добавляем условие
+	if brandID, err := args.ParseBrandId(); err != nil {
+		return nil, 0, fmt.Errorf("invalid brandId: %w", err)
+	} else if brandID != nil {
+		conditions = append(conditions, fmt.Sprintf("ci.brand_id = $%d", argIdx))
+		sqlArgs = append(sqlArgs, *brandID)
+		argIdx++
+	}
+
+	// Фильтр по категории: аналогично brandId
+	if categoryID, err := args.ParseCategoryId(); err != nil {
+		return nil, 0, fmt.Errorf("invalid categoryId: %w", err)
+	} else if categoryID != nil {
+		conditions = append(conditions, fmt.Sprintf("ci.category_id = $%d", argIdx))
+		sqlArgs = append(sqlArgs, *categoryID)
+		argIdx++
+	}
+
+	// Полнотекстовый поиск по названию и краткому описанию товара (ILIKE — без учёта регистра)
+	if args.Search != nil && *args.Search != "" {
+		pattern := fmt.Sprintf("ci.title ILIKE $%d OR ci.short_description ILIKE $%d", argIdx, argIdx+1)
+		conditions = append(conditions, "("+pattern+")")
+		searchVal := "%" + *args.Search + "%"
+		sqlArgs = append(sqlArgs, searchVal, searchVal)
+		argIdx += 2
+	}
+
+	// Собираем WHERE-секцию: если есть условия — объединяем через AND
+	whereClause := ""
+	if len(conditions) > 0 {
+		whereClause = "WHERE " + strings.Join(conditions, " AND ")
+	}
+
+	// --- Определение ORDER BY ---
+	// Допустимые значения sort: price_asc, price_desc, title_asc, title_desc
+	// По умолчанию сортируем по ci.title ASC
+	orderClause := "ORDER BY ci.title ASC"
+	if args.Sort != nil {
+		switch *args.Sort {
+		case "price_asc":
+			orderClause = "ORDER BY ci.price ASC"
+		case "price_desc":
+			orderClause = "ORDER BY ci.price DESC"
+		case "title_asc":
+			orderClause = "ORDER BY ci.title ASC"
+		case "title_desc":
+			orderClause = "ORDER BY ci.title DESC"
+		}
+	}
+
+	// --- Запрос общего количества (COUNT) для пагинации ---
+	// Выполняем отдельный COUNT-запрос с теми же WHERE-условиями, но без LIMIT/OFFSET,
+	// чтобы UI мог рассчитать общее число страниц.
+	countQuery := fmt.Sprintf(`
+		SELECT COUNT(*)
+		FROM catalog_items ci
+		LEFT JOIN brands b ON b.id = ci.brand_id
+		LEFT JOIN categories c ON c.id = ci.category_id
+		%s
+	`, whereClause)
+
+	var totalCount int
+	if err := r.db.QueryRowContext(ctx, countQuery, sqlArgs...).Scan(&totalCount); err != nil {
+		return nil, 0, fmt.Errorf("count catalog items: %w", err)
+	}
+
+	// --- Пагинация: LIMIT и OFFSET ---
+	// LIMIT — количество строк на странице
+	// OFFSET — сколько строк пропустить (вычисляется из номера страницы)
+	limit := args.PageSize
+	offset := (args.PageIndex - 1) * args.PageSize
+
+	// Добавляем LIMIT и OFFSET как следующие плейсхолдеры
+	limitPlaceholder := fmt.Sprintf("$%d", argIdx)
+	offsetPlaceholder := fmt.Sprintf("$%d", argIdx+1)
+	sqlArgs = append(sqlArgs, limit, offset)
+
+	// --- Финальный SQL-запрос с фильтром, сортировкой и пагинацией ---
+	dataQuery := fmt.Sprintf(`
+		%s
+		%s
+		%s
+		LIMIT %s OFFSET %s
+	`, sqlCatalogItemsQuery, whereClause, orderClause, limitPlaceholder, offsetPlaceholder)
+
+	rows, err := r.db.QueryContext(ctx, dataQuery, sqlArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("items with filter query: %w", err)
+	}
+	defer rows.Close()
+
+	// Накапливаем результаты
+	var items []entities.CatalogItem
+	for rows.Next() {
+		item, err := scanCatalogItem(rows)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scan catalog item (filter): %w", err)
+		}
+		items = append(items, item)
+	}
+
+	return items, totalCount, rows.Err()
+}
+
+// ItemsByTitlePaged — поиск товаров по названию с поддержкой пагинации.
+// Выполняет два запроса: COUNT для общего числа совпадений и SELECT с LIMIT/OFFSET для страницы.
+//
+// Параметры:
+//   - ctx: контекст запроса
+//   - title: строка поиска (частичное совпадение через LIKE)
+//   - args: параметры пагинации (PageIndex, PageSize)
+//
+// Возвращает:
+//   - []entities.CatalogItem: список товаров на текущей странице
+//   - int: общее число найденных товаров
+//   - error: ошибку SQL-запроса или сканирования
+func (r *itemRepository) ItemsByTitlePaged(ctx context.Context, title string, args spec.QueryArgs) ([]entities.CatalogItem, int, error) {
+	// Запрос общего числа совпадений (без LIMIT/OFFSET)
+	countQuery := `
+		SELECT COUNT(*)
+		FROM catalog_items ci
+		LEFT JOIN brands b ON b.id = ci.brand_id
+		LEFT JOIN categories c ON c.id = ci.category_id
+		WHERE ci.title LIKE '%' || $1 || '%'
+	`
+	var totalCount int
+	if err := r.db.QueryRowContext(ctx, countQuery, title).Scan(&totalCount); err != nil {
+		return nil, 0, fmt.Errorf("items by title count: %w", err)
+	}
+
+	// Вычисляем смещение (OFFSET) из номера страницы
+	offset := (args.PageIndex - 1) * args.PageSize
+
+	// Запрос страницы товаров с LIMIT/OFFSET
+	dataQuery := sqlCatalogItemsQuery + `WHERE ci.title LIKE '%' || $1 || '%' ORDER BY ci.title ASC LIMIT $2 OFFSET $3`
+
+	rows, err := r.db.QueryContext(ctx, dataQuery, title, args.PageSize, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("items by title paged query: %w", err)
+	}
+	defer rows.Close()
+
+	var items []entities.CatalogItem
+	for rows.Next() {
+		item, err := scanCatalogItem(rows)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scan catalog item by title: %w", err)
+		}
+		items = append(items, item)
+	}
+
+	return items, totalCount, rows.Err()
+}
+
+// ItemsByBrandPaged — поиск товаров по названию бренда с поддержкой пагинации.
+// Выполняет два запроса: COUNT для общего числа совпадений и SELECT с LIMIT/OFFSET для страницы.
+//
+// Параметры:
+//   - ctx: контекст запроса
+//   - brandTitle: строка поиска по названию бренда (частичное совпадение через LIKE)
+//   - args: параметры пагинации (PageIndex, PageSize)
+//
+// Возвращает:
+//   - []entities.CatalogItem: список товаров на текущей странице
+//   - int: общее число найденных товаров
+//   - error: ошибку SQL-запроса или сканирования
+func (r *itemRepository) ItemsByBrandPaged(ctx context.Context, brandTitle string, args spec.QueryArgs) ([]entities.CatalogItem, int, error) {
+	// Запрос общего числа совпадений (без LIMIT/OFFSET)
+	countQuery := `
+		SELECT COUNT(*)
+		FROM catalog_items ci
+		LEFT JOIN brands b ON b.id = ci.brand_id
+		LEFT JOIN categories c ON c.id = ci.category_id
+		WHERE b.title LIKE '%' || $1 || '%'
+	`
+	var totalCount int
+	if err := r.db.QueryRowContext(ctx, countQuery, brandTitle).Scan(&totalCount); err != nil {
+		return nil, 0, fmt.Errorf("items by brand count: %w", err)
+	}
+
+	// Вычисляем смещение (OFFSET) из номера страницы
+	offset := (args.PageIndex - 1) * args.PageSize
+
+	// Запрос страницы товаров с LIMIT/OFFSET
+	dataQuery := sqlCatalogItemsQuery + `WHERE b.title LIKE '%' || $1 || '%' ORDER BY ci.title ASC LIMIT $2 OFFSET $3`
+
+	rows, err := r.db.QueryContext(ctx, dataQuery, brandTitle, args.PageSize, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("items by brand paged query: %w", err)
+	}
+	defer rows.Close()
+
+	var items []entities.CatalogItem
+	for rows.Next() {
+		item, err := scanCatalogItem(rows)
+		if err != nil {
+			return nil, 0, fmt.Errorf("scan catalog item by brand: %w", err)
+		}
+		items = append(items, item)
+	}
+
+	return items, totalCount, rows.Err()
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"          // Пакет для форматирования ошибок (fmt.Errorf)
 
 	"marketplace/internal/catalog/domain/entities" // Импортируем доменную модель Brand
+	"marketplace/internal/catalog/domain/spec"     // Параметры пагинации
 )
 
 // BrandRepository — конкретная структура репозитория брендов.
@@ -63,4 +64,51 @@ func (r *BrandRepository) Brands(ctx context.Context) ([]entities.Brand, error) 
 
 	// Проверяем, не возникло ли ошибок во время итерирования по курсору rows
 	return brands, rows.Err()
+}
+
+// BrandsPaged — метод получения брендов с пагинацией.
+// Выполняет два запроса: COUNT для подсчёта общего числа брендов и SELECT с LIMIT/OFFSET для текущей страницы.
+//
+// Параметры:
+//   - ctx (context.Context): контекст запроса
+//   - args (spec.QueryArgs): параметры пагинации (PageIndex, PageSize)
+//
+// Возвращает:
+//   - []entities.Brand: список брендов на текущей странице
+//   - int: общее количество брендов (для расчёта числа страниц)
+//   - error: ошибку SQL-запроса или сканирования строк
+func (r *BrandRepository) BrandsPaged(ctx context.Context, args spec.QueryArgs) ([]entities.Brand, int, error) {
+	// Запрос общего количества брендов (без LIMIT/OFFSET)
+	var totalCount int
+	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM brands`).Scan(&totalCount); err != nil {
+		return nil, 0, fmt.Errorf("brands count query: %w", err)
+	}
+
+	// Вычисляем смещение (OFFSET) из номера страницы
+	offset := (args.PageIndex - 1) * args.PageSize
+
+	// Запрос страницы брендов с LIMIT и OFFSET
+	rows, err := r.db.QueryContext(ctx, `
+	SELECT
+		id, title
+	FROM brands
+	ORDER BY title
+	LIMIT $1 OFFSET $2
+	`, args.PageSize, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("brands paged query: %w", err)
+	}
+	defer rows.Close()
+
+	var brands []entities.Brand
+
+	for rows.Next() {
+		var b entities.Brand
+		if err := rows.Scan(&b.Id, &b.Title); err != nil {
+			return nil, 0, fmt.Errorf("scan brand error: %w", err)
+		}
+		brands = append(brands, b)
+	}
+
+	return brands, totalCount, rows.Err()
 }
