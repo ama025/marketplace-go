@@ -59,75 +59,78 @@ services:
       retries: 10
       start_period: 30s
 
-  # ─── Basket (TODO: раскомментировать когда будет готов cmd/basket) ────────
-  # basket_db_prod:
-  #   container_name: "basket-db-prod"
-  #   image: postgres:18.1
-  #   environment:
-  #     - POSTGRES_USER=postgres
-  #     - POSTGRES_PASSWORD=12345678
-  #     - POSTGRES_DB=basket-db-prod
-  #   restart: always
-  #   ports:
-  #     - "9302:5432"
-  #   volumes:
-  #     - postgres_basket_prod:/var/lib/postgresql
-  #   networks:
-  #     - marketplace-prod-net
-  #   healthcheck:
-  #     test: ["CMD-SHELL", "pg_isready -U postgres"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 30s
+  # ─── Basket ────────────────────────────────────────────────────────────────
+  basket_db_prod:
+    container_name: "basket-db-prod"
+    image: postgres:18.1
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=12345678
+      - POSTGRES_DB=basket-db-prod
+    restart: always
+    ports:
+      - "9302:5432"
+    volumes:
+      - postgres_basket_prod:/var/lib/postgresql
+    networks:
+      - marketplace-prod-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
-  # basket_cache_redis_prod:
-  #   container_name: basket-redis-prod
-  #   image: redis:7
-  #   command: redis-server --requirepass "12345678" --protected-mode no
-  #   restart: always
-  #   ports:
-  #     - "9312:6379"
-  #   volumes:
-  #     - redis_basket_prod:/data
-  #   networks:
-  #     - marketplace-prod-net
-  #   healthcheck:
-  #     test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 5
-  #     start_period: 20s
+  basket_cache_redis_prod:
+    container_name: basket-redis-prod
+    image: redis:7
+    command: redis-server --requirepass "12345678" --protected-mode no
+    restart: always
+    ports:
+      - "9312:6379"
+    volumes:
+      - redis_basket_prod:/data
+    networks:
+      - marketplace-prod-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
-  # basket_api:
-  #   container_name: basket-api
-  #   build:
-  #     context: .
-  #     dockerfile: cmd/basket/Dockerfile
-  #   ports:
-  #     - "9202:7002"
-  #   networks:
-  #     - marketplace-prod-net
-  #   environment:
-  #     - BASKET_APP_PORT=7002
-  #     - BASKET_DATABASE_URL=postgres://postgres:12345678@basket_db_prod:5432/basket-db-prod?sslmode=disable
-  #     - BASKET_MIGRATIONS_PATH=file:///app/migrations/basket
-  #     - BASKET_REDIS_URL=basket_cache_redis_prod:6379
-  #     - BASKET_REDIS_PASSWORD=12345678
-  #     - BASKET_PROMOTION_HOST=promotion-grpc
-  #     - BASKET_PROMOTION_PORT=7003
-  #     - BASKET_RABBITMQ_HOST=rabbit_mq_prod
-  #     - BASKET_RABBITMQ_PORT=5672
-  #     - BASKET_RABBITMQ_USER=guest
-  #     - BASKET_RABBITMQ_PASSWORD=guest
-  #   depends_on:
-  #     basket_db_prod:
-  #       condition: service_healthy
-  #     basket_cache_redis_prod:
-  #       condition: service_healthy
-  #     promotion-grpc:
-  #       condition: service_healthy
-  #   restart: unless-stopped
+  basket_api:
+    container_name: basket-api
+    build:
+      context: .
+      dockerfile: cmd/basket/Dockerfile
+    ports:
+      - "9202:7002"
+    networks:
+      - marketplace-prod-net
+    environment:
+      - BASKET_APP_PORT=7002
+      - BASKET_PG_HOST=basket_db_prod
+      - BASKET_PG_PORT=5432
+      - BASKET_PG_DATABASE=basket-db-prod
+      - BASKET_PG_USER=postgres
+      - BASKET_PG_PASSWORD=12345678
+      - BASKET_PG_SSLMODE=disable
+      - BASKET_MIGRATIONS_PATH=file:///app/migrations/basket
+      - BASKET_REDIS_URL=basket_cache_redis_prod:6379
+      - BASKET_REDIS_PASSWORD=12345678
+    depends_on:
+      basket_db_prod:
+        condition: service_healthy
+      basket_cache_redis_prod:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:7002/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
 
   # ─── Promotion (TODO: раскомментировать когда будет готов cmd/promotion) ──
   # promotion_db_prod:
@@ -330,8 +333,8 @@ services:
 
 volumes:
   postgres_catalog_prod:
-  # postgres_basket_prod:     # раскомментировать с basket_api
-  # redis_basket_prod:        # раскомментировать с basket_api
+  postgres_basket_prod:
+  redis_basket_prod:
   # mysql_promotion_prod:     # раскомментировать с promotion-grpc
   # postgres_checkout_prod:   # раскомментировать с checkout_api
   # rabbitmq_data_prod:       # раскомментировать с checkout_api/basket_api
