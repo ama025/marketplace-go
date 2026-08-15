@@ -79,6 +79,24 @@ services:
       timeout: 2s
       retries: 10
 
+  promotion_grpc_dev:
+    container_name: promotion-grpc-dev
+    build:
+      context: .
+      dockerfile: cmd/promotion/Dockerfile
+    ports:
+      - "9203:7003"
+    networks:
+      - marketplace-dev-net
+    environment:
+      - PROMOTION_DATABASE_URL=root:12345678@tcp(promotion_db:3306)/promotion-db?parseTime=true&multiStatements=true
+      - PROMOTION_MIGRATIONS_PATH=file:///app/migrations/promotion
+      - PROMOTION_GRPC_PORT=7003
+    depends_on:
+      promotion_db:
+        condition: service_healthy
+    restart: unless-stopped
+
   # checkout
   checkout_db_dev:
     container_name: checkout-db-dev

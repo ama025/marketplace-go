@@ -132,48 +132,46 @@ services:
       retries: 10
       start_period: 30s
 
-  # ─── Promotion (TODO: раскомментировать когда будет готов cmd/promotion) ──
-  # promotion_db_prod:
-  #   container_name: promotion-db-prod
-  #   image: mysql:8.0
-  #   environment:
-  #     MYSQL_ROOT_PASSWORD: 12345678
-  #     MYSQL_DATABASE: promotion-db
-  #     MYSQL_CHARACTER_SET_SERVER: utf8mb4
-  #     MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
-  #   restart: always
-  #   ports:
-  #     - "9303:3306"
-  #   volumes:
-  #     - mysql_promotion_prod:/var/lib/mysql
-  #   networks:
-  #     - marketplace-prod-net
-  #   healthcheck:
-  #     test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p12345678"]
-  #     interval: 10s
-  #     timeout: 10s
-  #     retries: 10
-  #     start_period: 30s
+  # ─── Promotion ────────────────────────────────────────────────────────────────
+  promotion_db_prod:
+    container_name: promotion-db-prod
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: 12345678
+      MYSQL_DATABASE: promotion-db
+      MYSQL_CHARACTER_SET_SERVER: utf8mb4
+      MYSQL_COLLATION_SERVER: utf8mb4_unicode_ci
+    restart: always
+    ports:
+      - "9303:3306"
+    volumes:
+      - mysql_promotion_prod:/var/lib/mysql
+    networks:
+      - marketplace-prod-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-p12345678"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
 
-  # promotion-grpc:
-  #   container_name: promotion-grpc
-  #   build:
-  #     context: .
-  #     dockerfile: cmd/promotion/Dockerfile
-  #   ports:
-  #     - "9203:7003"
-  #     - "9213:7013"
-  #   networks:
-  #     - marketplace-prod-net
-  #   environment:
-  #     - PROMOTION_DATABASE_URL=root:12345678@tcp(promotion_db_prod:3306)/promotion-db?parseTime=true&multiStatements=true
-  #     - PROMOTION_MIGRATIONS_PATH=file:///app/migrations/promotion
-  #     - PROMOTION_GRPC_PORT=7003
-  #     - PROMOTION_METRICS_PORT=7013
-  #   depends_on:
-  #     promotion_db_prod:
-  #       condition: service_healthy
-  #   restart: unless-stopped
+  promotion_grpc:
+    container_name: promotion-grpc
+    build:
+      context: .
+      dockerfile: cmd/promotion/Dockerfile
+    ports:
+      - "9203:7003"
+    networks:
+      - marketplace-prod-net
+    environment:
+      - PROMOTION_DATABASE_URL=root:12345678@tcp(promotion_db_prod:3306)/promotion-db?parseTime=true&multiStatements=true
+      - PROMOTION_MIGRATIONS_PATH=file:///app/migrations/promotion
+      - PROMOTION_GRPC_PORT=7003
+    depends_on:
+      promotion_db_prod:
+        condition: service_healthy
+    restart: unless-stopped
 
   # ─── Checkout (TODO: раскомментировать когда будет готов cmd/checkout) ────
   # checkout_db_prod:
@@ -335,7 +333,7 @@ volumes:
   postgres_catalog_prod:
   postgres_basket_prod:
   redis_basket_prod:
-  # mysql_promotion_prod:     # раскомментировать с promotion-grpc
+  mysql_promotion_prod:
   # postgres_checkout_prod:   # раскомментировать с checkout_api
   # rabbitmq_data_prod:       # раскомментировать с checkout_api/basket_api
   # prometheus_data:          # раскомментировать с prometheus
