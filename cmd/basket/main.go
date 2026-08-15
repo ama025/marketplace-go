@@ -21,6 +21,7 @@ import (
 	"marketplace/internal/basket/infrastructure/cache"      // Реализация репозитория Redis
 	"marketplace/internal/basket/infrastructure/persistence" // Реализация репозитория PostgreSQL
 	"marketplace/internal/shared"                            // Общие middleware
+	"marketplace/internal/shared/messaging"                  // RabbitMQ publisher
 )
 
 // main — точка входа в программу. Здесь инициализируется веб-сервер и маршруты.
@@ -31,15 +32,19 @@ func main() {
 		log.Println(err)
 	}
 
-	appPort := os.Getenv("BASKET_APP_PORT")
-	pgHost := os.Getenv("BASKET_PG_HOST")
-	pgPort := os.Getenv("BASKET_PG_PORT")
-	pgDB := os.Getenv("BASKET_PG_DATABASE")
-	pgUser := os.Getenv("BASKET_PG_USER")
-	pgPass := os.Getenv("BASKET_PG_PASSWORD")
-	pgSSL := os.Getenv("BASKET_PG_SSLMODE")
-	redisAddr := os.Getenv("BASKET_REDIS_URL")
-	redisPass := os.Getenv("BASKET_REDIS_PASSWORD")
+	appPort    := os.Getenv("BASKET_APP_PORT")
+	pgHost     := os.Getenv("BASKET_PG_HOST")
+	pgPort     := os.Getenv("BASKET_PG_PORT")
+	pgDB       := os.Getenv("BASKET_PG_DATABASE")
+	pgUser     := os.Getenv("BASKET_PG_USER")
+	pgPass     := os.Getenv("BASKET_PG_PASSWORD")
+	pgSSL      := os.Getenv("BASKET_PG_SSLMODE")
+	redisAddr  := os.Getenv("BASKET_REDIS_URL")
+	redisPass  := os.Getenv("BASKET_REDIS_PASSWORD")
+	rabbitHost := os.Getenv("BASKET_RABBITMQ_HOST")
+	rabbitPort := os.Getenv("BASKET_RABBITMQ_PORT")
+	rabbitUser := os.Getenv("BASKET_RABBITMQ_USER")
+	rabbitPass := os.Getenv("BASKET_RABBITMQ_PASSWORD")
 
 	// BASKET_MIGRATIONS_PATH задаётся в .env, например: file://../../migrations/basket
 	migrationsPath := os.Getenv("BASKET_MIGRATIONS_PATH")
@@ -109,8 +114,21 @@ func main() {
 	// Redis-репозиторий — основное хранилище корзины (быстрое, in-memory)
 	cartRepo := cache.NewRedisCartRepository(rdb)
 
-	// Создаём HTTP-хендлер корзины, передавая интерфейс репозитория
-	cartHandler := handlers.NewCartHandler(cartRepo)
+	// --- RabbitMQ Publisher ---
+	// Basket публикует событие OrderConfirmed когда пользователь оформляет заказ.
+	amqpURL := fmt.Sprintf("amqp://%s:%s@%s:%s/", rabbitUser, rabbitPass, rabbitHost, rabbitPort)
+	publisher, err := messaging.NewPublisher(amqpURL)
+	if err != nil {
+		// Не фатально — работаем без публикации (корзина продолжает работать)
+		log.Printf("WARNING: rabbitmq publisher unavailable: %v", err)
+		publisher = nil
+	} else {
+		defer publisher.Close()
+		log.Println("rabbitmq publisher connected")
+	}
+
+	// Создаём HTTP-хендлер корзины, передавая интерфейс репозитория и publisher
+	cartHandler := handlers.NewCartHandlerWithPublisher(cartRepo, publisher)
 
 	// gin.New() — роутер без встроенных middleware (в отличие от gin.Default()).
 	// Мы подключаем только наш ErrorHandleMiddleware, который покрывает и логирование ошибок, и recovery от паники.

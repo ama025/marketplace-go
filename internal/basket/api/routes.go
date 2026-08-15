@@ -24,4 +24,8 @@ func RegisterRoutes(r *gin.Engine, cart *handlers.CartHandler) {
 
 	// DELETE /api/v1/cart/:accountName — удаление корзины (после оформления заказа)
 	v1.DELETE("/cart/:accountName", cart.DeleteCart)
+
+	// POST /api/v1/cart/:accountName/checkout — оформить заказ:
+	// публикует OrderConfirmed в RabbitMQ → Checkout создаёт Order → корзина очищается
+	v1.POST("/cart/:accountName/checkout", cart.CheckoutCart)
 }
