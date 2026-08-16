@@ -1,5 +1,4 @@
--- 000002_seed_discounts.down.sql
--- Откат: удаляем тестовые данные
+
 
 DELETE FROM discounts WHERE id IN (
   'a1b2c3d4-0000-0000-0000-000000000001',

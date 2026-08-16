@@ -7,7 +7,6 @@ import (
 	"marketplace/internal/checkout/domain/repositories"
 )
 
-// GetOrdersByAccountHandler — use case «Получить все заказы покупателя».
 type GetOrdersByAccountHandler struct {
 	repo repositories.OrderRepository
 }

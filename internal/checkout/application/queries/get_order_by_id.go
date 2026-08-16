@@ -9,7 +9,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// GetOrderByIDHandler — use case «Получить заказ по ID».
 type GetOrderByIDHandler struct {
 	repo repositories.OrderRepository
 }

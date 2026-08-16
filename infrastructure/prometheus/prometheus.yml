@@ -1,0 +1,39 @@
+# Prometheus конфигурация для marketplace (dev)
+#
+# host.docker.internal — специальный адрес Docker,
+# который указывает на localhost хост-машины (твой Mac).
+# Используется потому что Prometheus внутри Docker не видит localhost.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Сам Prometheus
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # Catalog API (go run на Mac, порт 9001)
+  - job_name: "catalog"
+    static_configs:
+      - targets: ["host.docker.internal:9001"]
+    metrics_path: /metrics
+
+  # Basket API (go run на Mac, порт 9002)
+  - job_name: "basket"
+    static_configs:
+      - targets: ["host.docker.internal:9002"]
+    metrics_path: /metrics
+
+  # Checkout API (go run на Mac, порт 9004)
+  - job_name: "checkout"
+    static_configs:
+      - targets: ["host.docker.internal:9004"]
+    metrics_path: /metrics
+
+  # Promotion gRPC (отдельный HTTP порт для метрик)
+  - job_name: "promotion"
+    static_configs:
+      - targets: ["host.docker.internal:7013"]
+    metrics_path: /metrics

@@ -141,6 +141,93 @@ services:
       retries: 15
       start_period: 30s
 
+  # monitoring
+  prometheus_dev:
+    container_name: prometheus-dev
+    image: prom/prometheus:v3.10.0
+    restart: always
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data_dev:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    networks:
+      - marketplace-dev-net
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  grafana_dev:
+    container_name: grafana-dev
+    image: grafana/grafana:12.3.4
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data_dev:/var/lib/grafana
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks:
+      - marketplace-dev-net
+    depends_on:
+      prometheus_dev:
+        condition: service_healthy
+
+  # ─── k6 Load Testing ─────────────────────────────────────────────────────────
+  # Запускаются вручную:
+  #   docker compose -p marketplace-dev -f compose-dev.yaml run k6_catalog
+  #   docker compose -p marketplace-dev -f compose-dev.yaml run k6_basket
+  #   docker compose -p marketplace-dev -f compose-dev.yaml run k6_checkout
+  k6_catalog:
+    container_name: k6-catalog-test
+    image: grafana/k6:latest
+    volumes:
+      - ./infrastructure/k6:/scripts:ro
+    environment:
+      - TARGET_URL=http://host.docker.internal:9001
+    networks:
+      - marketplace-dev-net
+    command: ["run", "/scripts/catalog-test.js"]
+    restart: "no"
+    profiles: ["k6"]  # не запускается при up -d, только через run
+
+  k6_basket:
+    container_name: k6-basket-test
+    image: grafana/k6:latest
+    volumes:
+      - ./infrastructure/k6:/scripts:ro
+    environment:
+      - TARGET_URL=http://host.docker.internal:9002
+    networks:
+      - marketplace-dev-net
+    command: ["run", "/scripts/basket-test.js"]
+    restart: "no"
+    profiles: ["k6"]
+
+  k6_checkout:
+    container_name: k6-checkout-test
+    image: grafana/k6:latest
+    volumes:
+      - ./infrastructure/k6:/scripts:ro
+    environment:
+      - TARGET_URL=http://host.docker.internal:9004
+    networks:
+      - marketplace-dev-net
+    command: ["run", "/scripts/checkout-test.js"]
+    restart: "no"
+    profiles: ["k6"]
+
 volumes:
   postgres_catalog_dev:
   postgres_basket_dev:
@@ -148,6 +235,8 @@ volumes:
   mysql_promotion:
   postgres_checkout_dev:
   rabbitmq_data_dev:
+  prometheus_data_dev:
+  grafana_data_dev:
 
 networks:
   marketplace-dev-net:

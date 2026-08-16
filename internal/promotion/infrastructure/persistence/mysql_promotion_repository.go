@@ -12,19 +12,14 @@ import (
 	"marketplace/internal/promotion/domain/repositories"
 )
 
-// mysqlPromotionRepository — MySQL реализация PromotionRepository.
-// Живёт в infrastructure-слое и знает о деталях БД.
-// Application-слой видит только интерфейс из domain/repositories.
 type mysqlPromotionRepository struct {
 	db *sql.DB
 }
 
-// NewMySQLPromotionRepository создаёт репозиторий поверх переданного *sql.DB.
 func NewMySQLPromotionRepository(db *sql.DB) repositories.PromotionRepository {
 	return &mysqlPromotionRepository{db: db}
 }
 
-// Add вставляет новую скидку в таблицу discounts и возвращает её UUID.
 func (r *mysqlPromotionRepository) Add(ctx context.Context, d entities.Discount) (string, error) {
 	d.ID = uuid.NewString()
 
@@ -39,7 +34,6 @@ func (r *mysqlPromotionRepository) Add(ctx context.Context, d entities.Discount)
 	return d.ID, nil
 }
 
-// FindByCatalogItem возвращает активную скидку для товара или nil если её нет.
 func (r *mysqlPromotionRepository) FindByCatalogItem(ctx context.Context, itemID string) (*entities.Discount, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, item_id, percent, active, created_at, updated_at
@@ -52,7 +46,7 @@ func (r *mysqlPromotionRepository) FindByCatalogItem(ctx context.Context, itemID
 
 	d, err := scanDiscount(row)
 	if err == sql.ErrNoRows {
-		return nil, nil // скидки нет — это норма
+		return nil, nil
 	}
 	if err != nil {
 		return nil, err
@@ -60,14 +54,11 @@ func (r *mysqlPromotionRepository) FindByCatalogItem(ctx context.Context, itemID
 	return d, nil
 }
 
-// FindManyByCatalogItems возвращает активные скидки для списка товаров (batch).
-// Товары без скидки просто отсутствуют в результате.
 func (r *mysqlPromotionRepository) FindManyByCatalogItems(ctx context.Context, itemIDs []string) ([]entities.Discount, error) {
 	if len(itemIDs) == 0 {
 		return nil, nil
 	}
 
-	// Строим placeholders: ?,?,? для IN-запроса
 	placeholders := strings.Repeat("?,", len(itemIDs))
 	placeholders = placeholders[:len(placeholders)-1]
 
@@ -101,8 +92,6 @@ func (r *mysqlPromotionRepository) FindManyByCatalogItems(ctx context.Context, i
 	return discounts, rows.Err()
 }
 
-// Deactivate помечает скидку как неактивную (active = FALSE).
-// Физически запись не удаляется — история сохраняется.
 func (r *mysqlPromotionRepository) Deactivate(ctx context.Context, discountID string) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE discounts SET active = FALSE WHERE id = ?`,
@@ -110,8 +99,6 @@ func (r *mysqlPromotionRepository) Deactivate(ctx context.Context, discountID st
 	)
 	return err
 }
-
-// ─── helpers ──────────────────────────────────────────────────────────────────
 
 type discountScanner interface {
 	Scan(dest ...any) error
@@ -126,7 +113,6 @@ func scanDiscount(row discountScanner) (*entities.Discount, error) {
 	return &d, nil
 }
 
-// nullTime конвертирует *time.Time в sql.NullTime для корректной записи NULL в MySQL.
 func nullTime(t *time.Time) sql.NullTime {
 	if t == nil {
 		return sql.NullTime{Valid: false}

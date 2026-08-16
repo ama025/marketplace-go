@@ -1,0 +1,12 @@
+# Grafana автоматически подключается к Prometheus при старте.
+# Не нужно настраивать вручную через UI.
+
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090  # Имя сервиса в Docker-сети
+    isDefault: true
+    editable: true

@@ -10,7 +10,6 @@ import (
 	"github.com/google/uuid"
 )
 
-// OrderHandler — HTTP-обработчик для заказов.
 type OrderHandler struct {
 	createOrder     *commands.CreateOrderHandler
 	getByID         *queries.GetOrderByIDHandler
@@ -29,7 +28,6 @@ func NewOrderHandler(
 	}
 }
 
-// CreateOrder POST /orders
 func (h *OrderHandler) CreateOrder(c *gin.Context) {
 	var cmd commands.CreateOrderCommand
 	if err := c.ShouldBindJSON(&cmd); err != nil {
@@ -46,7 +44,6 @@ func (h *OrderHandler) CreateOrder(c *gin.Context) {
 	c.JSON(http.StatusCreated, order)
 }
 
-// GetOrderByID GET /orders/:id
 func (h *OrderHandler) GetOrderByID(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -67,7 +64,6 @@ func (h *OrderHandler) GetOrderByID(c *gin.Context) {
 	c.JSON(http.StatusOK, order)
 }
 
-// GetOrdersByAccount GET /orders?account=:name
 func (h *OrderHandler) GetOrdersByAccount(c *gin.Context) {
 	account := c.Query("account")
 	if account == "" {

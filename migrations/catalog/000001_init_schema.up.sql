@@ -19,7 +19,6 @@ CREATE TABLE catalog_items (
     price DOUBLE PRECISION NOT NULL DEFAULT 0
 );
 
--- Seed: Brands
 INSERT INTO
     brands (id, title)
 VALUES (
@@ -63,7 +62,6 @@ VALUES (
         'Славянка'
     );
 
--- Seed: Categories
 INSERT INTO
     categories (id, title)
 VALUES (
@@ -87,7 +85,6 @@ VALUES (
         'Косметика и уход'
     );
 
--- Seed: CatalogItems
 INSERT INTO
     catalog_items (
         id,

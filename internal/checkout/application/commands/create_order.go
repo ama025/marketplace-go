@@ -9,22 +9,19 @@ import (
 	"github.com/google/uuid"
 )
 
-// CreateOrderCommand — входные данные для создания заказа.
 type CreateOrderCommand struct {
 	AccountName string
 	Items       []OrderItemInput
 }
 
-// OrderItemInput — позиция при создании заказа.
 type OrderItemInput struct {
 	ItemID    uuid.UUID
 	ItemTitle string
 	Quantity  int
 	UnitPrice float64
-	Discount  float64 // % скидки от promotion-сервиса
+	Discount  float64
 }
 
-// CreateOrderHandler — use case «Оформить заказ».
 type CreateOrderHandler struct {
 	repo repositories.OrderRepository
 }
@@ -33,8 +30,6 @@ func NewCreateOrderHandler(repo repositories.OrderRepository) *CreateOrderHandle
 	return &CreateOrderHandler{repo: repo}
 }
 
-// Handle создаёт заказ из корзины.
-// Рассчитывает total_price с учётом скидок.
 func (h *CreateOrderHandler) Handle(ctx context.Context, cmd CreateOrderCommand) (entities.Order, error) {
 	items := make([]entities.OrderItem, 0, len(cmd.Items))
 	var total float64

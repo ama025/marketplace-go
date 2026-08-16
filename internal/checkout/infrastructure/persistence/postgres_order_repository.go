@@ -10,18 +10,14 @@ import (
 	"github.com/google/uuid"
 )
 
-// postgresOrderRepository — PostgreSQL реализация OrderRepository.
 type postgresOrderRepository struct {
 	db *sql.DB
 }
 
-// NewPostgresOrderRepository создаёт репозиторий поверх *sql.DB.
 func NewPostgresOrderRepository(db *sql.DB) repositories.OrderRepository {
 	return &postgresOrderRepository{db: db}
 }
 
-// Create создаёт заказ и его позиции в транзакции.
-// TODO: реализовать полную логику
 func (r *postgresOrderRepository) Create(ctx context.Context, order entities.Order) (entities.Order, error) {
 	order.ID = uuid.New()
 
@@ -57,8 +53,6 @@ func (r *postgresOrderRepository) Create(ctx context.Context, order entities.Ord
 	return order, nil
 }
 
-// GetByID возвращает заказ по UUID.
-// TODO: реализовать JOIN с order_items
 func (r *postgresOrderRepository) GetByID(ctx context.Context, id uuid.UUID) (*entities.Order, error) {
 	row := r.db.QueryRowContext(ctx,
 		`SELECT id, account_name, status, total_price, created_at, updated_at
@@ -77,8 +71,6 @@ func (r *postgresOrderRepository) GetByID(ctx context.Context, id uuid.UUID) (*e
 	return &o, nil
 }
 
-// GetByAccount возвращает все заказы покупателя.
-// TODO: реализовать JOIN с order_items
 func (r *postgresOrderRepository) GetByAccount(ctx context.Context, accountName string) ([]entities.Order, error) {
 	rows, err := r.db.QueryContext(ctx,
 		`SELECT id, account_name, status, total_price, created_at, updated_at
@@ -102,7 +94,6 @@ func (r *postgresOrderRepository) GetByAccount(ctx context.Context, accountName 
 	return orders, rows.Err()
 }
 
-// UpdateStatus меняет статус заказа.
 func (r *postgresOrderRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status entities.OrderStatus) error {
 	_, err := r.db.ExecContext(ctx,
 		`UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2`,

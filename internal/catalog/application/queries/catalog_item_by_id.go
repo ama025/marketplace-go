@@ -17,5 +17,5 @@ func NewCatalogItemByIDHandler(repo repositories.CatalogItemRepository) *Catalog
 }
 
 func (h *CatalogItemByIDHandler) Handle(ctx context.Context, id uuid.UUID) (*entities.CatalogItem, error) {
-	return h.repo.Item(ctx, id) 
+	return h.repo.Item(ctx, id)
 }

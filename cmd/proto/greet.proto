@@ -1,83 +1,64 @@
 syntax = "proto3";
 
-// package — уникальное имя пакета в мире protobuf
 package greet;
 
-// option go_package — куда генерировать Go файлы
-// формат: "путь/к/пакету;имя_пакета_в_go"
 option go_package = "marketplace/internal/promotion/grpc/greetpb;greetpb";
 
-// GreetService — gRPC сервис promotion-а.
-// Basket вызывает эти методы чтобы получить скидки.
 service GreetService {
-  // SayHello — тестовый метод: проверяем что gRPC работает
+
   rpc SayHello(HelloRequest) returns (HelloResponse);
 
-  // GetDiscount — получить активную скидку для одного товара
   rpc GetDiscount(GetDiscountRequest) returns (GetDiscountResponse);
 
-  // GetDiscounts — получить скидки для списка товаров сразу (batch)
   rpc GetDiscounts(GetDiscountsRequest) returns (GetDiscountsResponse);
 
-  // AddDiscount — создать новую скидку для товара
   rpc AddDiscount(AddDiscountRequest) returns (AddDiscountResponse);
 
-  // DeactivateDiscount — деактивировать скидку (active=false, запись сохраняется)
   rpc DeactivateDiscount(DeactivateDiscountRequest) returns (DeactivateDiscountResponse);
 }
 
-// ─── SayHello ────────────────────────────────────────────────────────────────
-
 message HelloRequest {
-  string name = 1; // Имя для приветствия (например, "basket-service")
+  string name = 1;
 }
 
 message HelloResponse {
-  string message = 1; // Ответ: "Hello, basket-service!"
+  string message = 1;
 }
 
-// ─── GetDiscount ─────────────────────────────────────────────────────────────
-
 message GetDiscountRequest {
-  string item_id = 1; // UUID товара из каталога
+  string item_id = 1;
 }
 
 message GetDiscountResponse {
-  string item_id  = 1; // UUID товара
-  double percent  = 2; // Процент скидки (0 если нет скидки)
-  bool   active   = 3; // Есть ли активная скидка
+  string item_id  = 1;
+  double percent  = 2;
+  bool   active   = 3;
 }
 
-// ─── GetDiscounts (batch) ─────────────────────────────────────────────────────
-
 message GetDiscountsRequest {
-  repeated string item_ids = 1; // Список UUID товаров
+  repeated string item_ids = 1;
 }
 
 message GetDiscountsResponse {
-  repeated GetDiscountResponse discounts = 1; // Скидки для каждого товара
+  repeated GetDiscountResponse discounts = 1;
 }
 
-// ─── AddDiscount ──────────────────────────────────────────────────────────────
-
 message AddDiscountRequest {
-  string item_id   = 1; // UUID товара из каталога
-  double percent   = 2; // Процент скидки (0-100)
-  string starts_at = 3; // Начало действия RFC3339 (пустая строка = сразу)
-  string ends_at   = 4; // Конец действия RFC3339 (пустая строка = бессрочно)
+  string item_id   = 1;
+  double percent   = 2;
+  string starts_at = 3;
+  string ends_at   = 4;
 }
 
 message AddDiscountResponse {
-  string discount_id = 1; // UUID созданной скидки
-  bool   ok          = 2; // true если скидка успешно создана
+  string discount_id = 1;
+  bool   ok          = 2;
 }
 
-// ─── DeactivateDiscount ───────────────────────────────────────────────────────
-
 message DeactivateDiscountRequest {
-  string discount_id = 1; // UUID скидки которую нужно деактивировать
+  string discount_id = 1;
 }
 
 message DeactivateDiscountResponse {
-  bool ok = 1; // true если скидка успешно деактивирована
+  bool ok = 1;
 }

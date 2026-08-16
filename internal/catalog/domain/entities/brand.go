@@ -1,6 +1,5 @@
 package entities
 
-
-type Brand struct { 
+type Brand struct {
 	BaseEntity
 }

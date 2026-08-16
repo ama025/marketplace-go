@@ -23,11 +23,12 @@ import (
 	"marketplace/internal/checkout/application/commands"
 	"marketplace/internal/checkout/application/queries"
 	"marketplace/internal/checkout/infrastructure/persistence"
+	"marketplace/internal/shared"
 	"marketplace/internal/shared/messaging"
 )
 
 func main() {
-	// Загружаем .env файл — пробуем несколько путей
+
 	for _, path := range []string{".env", "../../.env"} {
 		if err := godotenv.Load(path); err == nil {
 			log.Printf(".env loaded from %s", path)
@@ -35,7 +36,6 @@ func main() {
 		}
 	}
 
-	// --- Переменные окружения ---
 	appPort     := os.Getenv("CHECKOUT_APP_PORT")
 	databaseURL := os.Getenv("CHECKOUT_DATABASE_URL")
 	rabbitHost  := os.Getenv("CHECKOUT_RABBITMQ_HOST")
@@ -45,7 +45,6 @@ func main() {
 
 	amqpURL := fmt.Sprintf("amqp://%s:%s@%s:%s/", rabbitUser, rabbitPass, rabbitHost, rabbitPort)
 
-	// --- PostgreSQL ---
 	db, err := sql.Open("postgres", databaseURL)
 	if err != nil {
 		log.Fatal("postgres open error:", err)
@@ -57,7 +56,6 @@ func main() {
 	}
 	log.Println("postgres connected successfully")
 
-	// --- Автомиграции ---
 	cwd, err := os.Getwd()
 	if err != nil {
 		log.Fatal("getwd error:", err)
@@ -79,7 +77,6 @@ func main() {
 	}
 	log.Println("migrations applied successfully")
 
-	// --- Dependency Injection ---
 	repo := persistence.NewPostgresOrderRepository(db)
 
 	createOrderCmd := commands.NewCreateOrderHandler(repo)
@@ -88,22 +85,17 @@ func main() {
 
 	orderHandler := handlers.NewOrderHandler(createOrderCmd, getByID, getByAccount)
 
-	// --- RabbitMQ Consumer ---
-	// Checkout слушает события "OrderConfirmed" которые публикует Basket.
-	// Запускаем в отдельной горутине — не блокирует HTTP сервер.
 	consumer, err := messaging.NewConsumer(amqpURL)
 	if err != nil {
 		log.Fatal("rabbitmq consumer error:", err)
 	}
 	defer consumer.Close()
 
-	// Контекст для graceful shutdown — останавливается по SIGTERM/SIGINT
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer stop()
 
 	go func() {
-		// Handler вызывается для каждого входящего сообщения OrderConfirmed.
-		// Создаёт заказ в PostgreSQL.
+
 		err := consumer.Consume(ctx, func(ctx context.Context, event messaging.OrderConfirmedEvent) error {
 			items := make([]commands.OrderItemInput, 0, len(event.Items))
 			for _, i := range event.Items {
@@ -138,12 +130,14 @@ func main() {
 		}
 	}()
 
-	// --- HTTP сервер ---
 	r := gin.Default()
+	r.Use(shared.MetricsMiddleware())
 
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
+
+	r.GET("/metrics", shared.MetricsHandler())
 
 	api.RegisterRoutes(r, orderHandler)
 
